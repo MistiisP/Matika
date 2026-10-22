@@ -2,131 +2,115 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+import math
 
-# =====================================================================
-# 1. NAČTENÍ A PŘÍPRAVA DAT
-# =====================================================================
 soubor = "FPS_data.xlsx"
 df = pd.read_excel(soubor)
 
-# Přesné názvy karet podle zadání
 karty = ["Nvidia RTX 3070 Ti", "AMD Radeon RX 6800 XT"]
 data_puvodni = {}
 data_ciste = {}
 odlehle_info = {}
 
 for k in karty:
-    # Názvy sloupců přesně tak, jak je vypsal tvůj Excel
     col_release = f"{k} average FPS release (FPS)"
     col_patched = f"{k} average FPS patched (FPS)"
     
-    # Výpočet nárůstu FPS: patched - release a odstranění prázdných řádků
+    # Výpočet nárůstu FPS: patched - release
     s = (df[col_patched] - df[col_release]).dropna()
     data_puvodni[k] = s
     
-    # Výpočet vnitřních hradeb pro odlehlá pozorování (1.5 * IQR)
-    q1 = np.percentile(s, 25)
-    q3 = np.percentile(s, 75)
+    # Výpočet kvartilů (R default type=7 odpovídá method='linear')
+    q1 = np.percentile(s, 25, method='linear')
+    q3 = np.percentile(s, 75, method='linear')
     iqr = q3 - q1
     dolni_hradba = q1 - 1.5 * iqr
     horni_hradba = q3 + 1.5 * iqr
     
-    # Odstranění odlehlých pozorování
     ciste = s[(s >= dolni_hradba) & (s <= horni_hradba)]
     odlehle = s[(s < dolni_hradba) | (s > horni_hradba)]
     
     data_ciste[k] = ciste
     odlehle_info[k] = (dolni_hradba, horni_hradba, odlehle.values)
 
-# =====================================================================
-# 2. VÝPIS VÝSLEDKŮ PRO LMS TEST (DO TERMINÁLU)
-# =====================================================================
-def vypis_statistiky(data_dict, nadpis):
-    print(f"\n{'='*70}\n{nadpis}\n{'='*70}")
-    for k, s in data_dict.items():
-        n = len(s)
-        prumer = np.mean(s)
-        std = np.std(s, ddof=1)
-        var = np.var(s, ddof=1)
-        q25, median, q75 = np.percentile(s, [25, 50, 75])
-        iqr = q75 - q25
-        sikmost = stats.skew(s, bias=False)
-        spicatost = stats.kurtosis(s, bias=False)
-        shapiro_stat, shapiro_p = stats.shapiro(s)
-        
-        ci_low, ci_high = stats.t.interval(0.95, df=n-1, loc=prumer, scale=stats.sem(s))
-        
-        print(f"\n>>> KARTA: {k} <<<")
-        print(f"  Rozsah výběru (n)           = {n}")
-        print(f"  Průměr                      = {prumer:.4f}  (zaokr. na 2 m.: {prumer:.2f} | na 1 m.: {prumer:.1f})")
-        print(f"  Směrodatná odchylka (s)     = {std:.4f}  (zaokr. na 2 m.: {std:.2f})")
-        print(f"  Rozptyl (s^2)               = {var:.4f}")
-        print(f"  Minimum                     = {np.min(s):.4f}")
-        print(f"  Dolní kvartil (Q1 / 25%)    = {q25:.4f}")
-        print(f"  Medián (Q2 / 50%)           = {median:.4f}  (zaokr. na 2 m.: {median:.2f} | na 1 m.: {median:.1f})")
-        print(f"  Horní kvartil (Q3 / 75%)    = {q75:.4f}")
-        print(f"  Maximum                     = {np.max(s):.4f}")
-        print(f"  Mezikvartilové rozp. (IQR)  = {iqr:.4f}")
-        print(f"  Šikmost (skewness)          = {sikmost:.4f}")
-        print(f"  Špičatost (kurtosis,okolí 0)= {spicatost:.4f} (pokud chtějí okolí 3: {spicatost+3:.4f})")
-        print(f"  Shapiro-Wilk p-hodnota      = {shapiro_p:.4f} ({'Normální (p > 0.05)' if shapiro_p > 0.05 else 'NENÍ normální (p < 0.05)'})")
-        print(f"  95% IS pro průměr           = ({ci_low:.2f} ; {ci_high:.2f})")
+def spocitej_radek(s):
+    n = len(s)
+    minimum = np.min(s)
+    q1 = np.percentile(s, 25, method='linear')
+    median = np.percentile(s, 50, method='linear')
+    prumer = np.mean(s)
+    q3 = np.percentile(s, 75, method='linear')
+    maximum = np.max(s)
+    std = np.std(s, ddof=1)
+    
+    # V Rku: moments::skewness a moments::kurtosis - 3 odpovídá bias=True
+    # V Rku: e1071::skewness(type=2) odpovídá bias=False
+    sik_moments = stats.skew(s, bias=True)
+    sik_e1071 = stats.skew(s, bias=False)
+    spic_moments = stats.kurtosis(s, bias=True)   # excess kurtosis (kolem 0)
+    spic_e1071 = stats.kurtosis(s, bias=False)    # excess kurtosis (kolem 0)
+    
+    return {
+        'n': n, 'min': minimum, 'q1': q1, 'med': median, 'mean': prumer,
+        'q3': q3, 'max': maximum, 'std': std,
+        'sik_m': sik_moments, 'sik_e': sik_e1071,
+        'spic_m': spic_moments, 'spic_e': spic_e1071
+    }
 
-vypis_statistiky(data_puvodni, "1. STATISTIKY PRO PŮVODNÍ DATA (PŘED ODSTRANĚNÍM ODLEHLÝCH)")
+st_puv = {k: spocitej_radek(data_puvodni[k]) for k in karty}
+st_cis = {k: spocitej_radek(data_ciste[k]) for k in karty}
 
-print("\n--- KONTROLA ODLEHLÝCH POZOROVÁNÍ (1.5 * IQR) ---")
+def vypis_tabulku(st, nazev, offset=0):
+    k1, k2 = karty[0], karty[1]
+    print(f"\n{'='*75}\n{nazev}\n{'='*75}")
+    print(f"{'Ukazatel':<22} | {k1:<24} | {k2:<24}")
+    print("-" * 75)
+    radky = [
+        ("rozsah souboru", f"{st[k1]['n']} (Odp.{1+offset})", f"{st[k2]['n']} (Odp.{2+offset})"),
+        ("minimum", f"{st[k1]['min']:.2f} (nebo {st[k1]['min']:.1f})", f"{st[k2]['min']:.2f} (nebo {st[k2]['min']:.1f})"),
+        ("dolní kvartil", f"{st[k1]['q1']:.2f} (nebo {st[k1]['q1']:.1f})", f"{st[k2]['q1']:.2f} (nebo {st[k2]['q1']:.1f})"),
+        ("medián", f"{st[k1]['med']:.2f} (nebo {st[k1]['med']:.1f})", f"{st[k2]['med']:.2f} (nebo {st[k2]['med']:.1f})"),
+        ("průměr", f"{st[k1]['mean']:.2f} (nebo {st[k1]['mean']:.1f})", f"{st[k2]['mean']:.2f} (nebo {st[k2]['mean']:.1f})"),
+        ("horní kvartil", f"{st[k1]['q3']:.2f} (nebo {st[k1]['q3']:.1f})", f"{st[k2]['q3']:.2f} (nebo {st[k2]['q3']:.1f})"),
+        ("maximum", f"{st[k1]['max']:.2f} (nebo {st[k1]['max']:.1f})", f"{st[k2]['max']:.2f} (nebo {st[k2]['max']:.1f})"),
+        ("směrod. odchylka", f"{st[k1]['std']:.2f} (nebo {st[k1]['std']:.3f})", f"{st[k2]['std']:.2f} (nebo {st[k2]['std']:.3f})"),
+        ("šikmost (e1071/mom)", f"{st[k1]['sik_e']:.2f} / {st[k1]['sik_m']:.2f}", f"{st[k2]['sik_e']:.2f} / {st[k2]['sik_m']:.2f}"),
+        ("špičatost (kolem 0)", f"{st[k1]['spic_e']:.2f} / {st[k1]['spic_m']:.2f}", f"{st[k2]['spic_e']:.2f} / {st[k2]['spic_m']:.2f}"),
+    ]
+    for r in radky:
+        print(f"{r[0]:<22} | {r[1]:<24} | {r[2]:<24}")
+
+vypis_tabulku(st_puv, "TAB. 1: PŮVODNÍ DATA (Odpovědi 1 až 20)", offset=0)
+
+print("\n--- ODLEHLÁ POZOROVÁNÍ (pro Odpověď 42) ---")
 for k in karty:
     dh, hh, odl = odlehle_info[k]
-    print(f"{k}: Dolní hradba = {dh:.2f}, Horní hradba = {hh:.2f} | Počet odlehlých: {len(odl)} -> hodnoty: {odl}")
+    print(f"{k}: Dolní hradba = {dh:.2f}, Horní hradba = {hh:.2f} | Počet odlehlých = {len(odl)} -> hodnoty: {odl}")
 
-vypis_statistiky(data_ciste, "2. STATISTIKY PO ODSTRANĚNÍ ODLEHLÝCH POZOROVÁNÍ")
+vypis_tabulku(st_cis, "TAB. 2: PO ODSTRANĚNÍ ODLEHLÝCH POZOROVÁNÍ (Odpovědi 21 až 40)", offset=20)
 
-# =====================================================================
-# 3. TVORBA GRAFŮ A ULOŽENÍ DO PDF PŘÍLOHY
-# =====================================================================
-fig = plt.figure(figsize=(12, 14))
-fig.suptitle("Obr. 1: Analýza nárůstu výkonnostního skóre (FPS) ve hře Cyberpunk 2077\npo aplikaci patche 1.5 pro grafické karty RTX 3070 Ti a RX 6800 XT", 
-             fontsize=13, fontweight='bold', y=0.98)
+print(f"\n{'='*75}\nTEXTOVÁ ČÁST PRO NVIDIA RTX 3070 (Odpovědi 41 až 50)\n{'='*75}")
+s3070 = st_cis[karty[0]]
+print(f"Odpověď 41 (původní rozsah n) : {st_puv[karty[0]]['n']}")
+print(f"Odpověď 42 (odlehlé hodnoty)  : Počet odlehlých je {len(odlehle_info[karty[0]][2])} (hodnoty: {odlehle_info[karty[0]][2]})")
+print(f"Odpověď 43 (nový rozsah n)    : {s3070['n']}")
+print(f"Odpověď 44 až 45 (min až max) : {s3070['min']:.2f} až {s3070['max']:.2f} (na 1 des. místo: {s3070['min']:.1f} až {s3070['max']:.1f})")
+print(f"Odpověď 46 (průměr)           : {s3070['mean']:.2f} (na 1 des. místo: {s3070['mean']:.1f})")
+print(f"Odpověď 47 (směr. odchylka)   : {s3070['std']:.2f} (na 1 des. místo: {s3070['std']:.1f})")
+print(f"Odpověď 48 (medián - polovina): {s3070['med']:.2f} (na 1 des. místo: {s3070['med']:.1f})")
+print(f"Odpověď 49 až 50 (Q1 až Q3)   : {s3070['q1']:.2f} až {s3070['q3']:.2f} (na 1 des. místo: {s3070['q1']:.1f} až {s3070['q3']:.1f})")
 
-ax1 = plt.subplot(3, 2, 1)
-bp1 = ax1.boxplot([data_puvodni[k] for k in karty], label=karty, patch_artist=True, widths=0.5)
-for patch, color in zip(bp1['boxes'], ['#a6cee3', '#b2df8a']):
-    patch.set_facecolor(color)
-ax1.set_title("a) Krabicový graf (původní data)", fontweight='bold')
-ax1.set_ylabel("Nárůst výkonu (FPS)")
-ax1.grid(axis='y', linestyle='--', alpha=0.6)
-
-ax2 = plt.subplot(3, 2, 2)
-bp2 = ax2.boxplot([data_ciste[k] for k in karty], label=karty, patch_artist=True, widths=0.5)
-for patch, color in zip(bp2['boxes'], ['#a6cee3', '#b2df8a']):
-    patch.set_facecolor(color)
-ax2.set_title("b) Krabicový graf (po odstranění odlehlých pozorování)", fontweight='bold')
-ax2.set_ylabel("Nárůst výkonu (FPS)")
-ax2.grid(axis='y', linestyle='--', alpha=0.6)
-
-spolecne_min = min( data_ciste[karty[0]].min(), data_ciste[karty[1]].min() )
-spolecne_max = max( data_ciste[karty[0]].max(), data_ciste[karty[1]].max() )
-bins = np.linspace(spolecne_min, spolecne_max, 12)
-
-barvy = ['#1f78b4', '#33a02c']
-for i, k in enumerate(karty):
-    ax_hist = plt.subplot(3, 2, 3 + i)
-    ax_hist.hist(data_ciste[k], bins=bins, color=barvy[i], edgecolor='black', alpha=0.75, density=False)
-    ax_hist.set_title(f"{'c' if i==0 else 'd'}) Histogram – {k}\n(bez odlehlých pozorování)", fontweight='bold')
-    ax_hist.set_xlabel("Nárůst výkonu (FPS)")
-    ax_hist.set_ylabel("Četnost")
-    ax_hist.set_xlim(spolecne_min - 1, spolecne_max + 1)
-    ax_hist.grid(axis='y', linestyle='--', alpha=0.6)
-
-for i, k in enumerate(karty):
-    ax_qq = plt.subplot(3, 2, 5 + i)
-    stats.probplot(data_ciste[k], dist="norm", plot=ax_qq)
-    ax_qq.set_title(f"{'e' if i==0 else 'f'}) Q-Q graf – {k}\n(bez odlehlých pozorování)", fontweight='bold')
-    ax_qq.set_xlabel("Teoretické kvantily (normální rozdělení)")
-    ax_qq.set_ylabel("Výběrové kvantily nárůstu (FPS)")
-    ax_qq.grid(True, linestyle='--', alpha=0.6)
-
-plt.tight_layout(rect=[0, 0, 1, 0.94])
-vystup_pdf = "DU1S_grafy.pdf"
-plt.savefig(vystup_pdf, format="pdf")
-print(f"\n>>> GRAF BYL ÚSPĚŠNĚ ULOŽEN DO SOUBORU: {vystup_pdf} <<<")
+print(f"\n{'='*75}\nOVĚŘENÍ NORMALITY A PRAVIDLO 2/3 SIGMA (Odpovědi 51 až 68)\n{'='*75}")
+for idx, k in enumerate(karty):
+    st_k = st_cis[k]
+    m, sd = st_k['mean'], st_k['std']
+    _, p_val = stats.shapiro(data_ciste[k])
+    je_norm = ( -2 < st_k['sik_e'] < 2 ) and ( -2 < st_k['spic_e'] < 2 ) and (p_val > 0.05)
+    
+    start_odp = 51 if idx == 0 else 60
+    print(f"\n>>> {k} (Odpovědi {start_odp} až {start_odp+8}) <<<")
+    print(f"  Šikmost = {st_k['sik_e']:.2f}, Špičatost = {st_k['spic_e']:.2f}, Shapiro p-hodnota = {p_val:.4f}")
+    print(f"  Verdikt normality: {'LZE předpokládat normální rozdělení (odpovídá / leží / leží / leží / lze)' if je_norm else 'NELZE předpokládat normální rozdělení'}")
+    print(f"  Pravidlo 1 sigma (68 % hodnot): ({m - 1*sd:.2f} ; {m + 1*sd:.2f}) | na 1 des.m.: ({m - 1*sd:.1f} ; {m + 1*sd:.1f})")
+    print(f"  Pravidlo 2 sigma (95 % hodnot): ({m - 2*sd:.2f} ; {m + 2*sd:.2f}) | na 1 des.m.: ({m - 2*sd:.1f} ; {m + 2*sd:.1f})")
+    print(f"  Pravidlo 3 sigma (99,7% hodnot): ({m - 3*sd:.2f} ; {m + 3*sd:.2f}) | na 1 des.m.: ({m - 3*sd:.1f} ; {m + 3*sd:.1f})")
