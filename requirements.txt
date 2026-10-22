@@ -1,3 +1,6 @@
 sympy
 scipy
 ipykernel
+pandas
+openpyxl
+matplotlib
