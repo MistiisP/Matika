@@ -1,0 +1,62 @@
+TAB. 1 - původní data
+
+Nvidia RTX 3070
+n: 72
+min: 3.700
+q1: 4.675
+med: 5.200
+mean: 5.329
+q3: 5.725
+max: 15.200
+std: 1.408
+sik_m: 4.882
+sik_e: 4.986
+spic_m: 31.827
+spic_e: 34.241
+
+AMD Radeon RX 6800
+n: 74
+min: -5.300
+q1: 5.125
+med: 5.700
+mean: 5.584
+q3: 6.275
+max: 7.400
+std: 1.497
+sik_m: -5.223
+sik_e: -5.332
+spic_m: 35.951
+spic_e: 38.590
+TAB. 2 - data po odstranění odlehlých pozorování
+
+Nvidia RTX 3070
+n: 70
+min: 3.700
+q1: 4.625
+med: 5.150
+mean: 5.154
+q3: 5.700
+max: 6.800
+std: 0.717
+sik_m: 0.149
+sik_e: 0.152
+spic_m: -0.625
+spic_e: -0.581
+
+AMD Radeon RX 6800
+n: 73
+min: 4.000
+q1: 5.200
+med: 5.700
+mean: 5.733
+q3: 6.300
+max: 7.400
+std: 0.778
+sik_m: -0.052
+sik_e: -0.053
+spic_m: -0.626
+spic_e: -0.584
+
+Odlehlá pozorování a vnitřní hradby
+Nvidia RTX 3070: dolní hradba 3.100, horní hradba 7.300, odlehlé hodnoty: 15.200, 7.700
+AMD Radeon RX 6800: dolní hradba 3.400, horní hradba 8.000, odlehlé hodnoty: -5.300
